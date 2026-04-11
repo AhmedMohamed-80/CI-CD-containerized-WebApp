@@ -74,7 +74,6 @@ metrics-dashboard/
 │       └── ci-cd.yml             # GitHub Actions pipeline
 ├── Dockerfile                    # Multi-stage build
 ├── docker-compose.yml            # Local dev stack
-├── .env.example                  # Environment variable template
 └── pom.xml
 ```
 
