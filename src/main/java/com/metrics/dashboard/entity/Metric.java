@@ -16,7 +16,7 @@ public class Metric {
     @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(nullable = false)
+    @Column(name = "metric_value", nullable = false)
     private Double value;
 
     @Column(nullable = false, length = 50)
