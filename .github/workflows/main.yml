@@ -85,5 +85,12 @@ jobs:
           EOF
  
       - name: Run Docker Compose
-        run: docker compose --env-file .env up --build
+        run: docker compose --env-file .env up --build -d
+      - name: Wait for app
+        run: sleep 15
+      - name: Test API
+        run: curl http://localhost:${{ secrets.APP_PORT }}/actuator/health
+      - name: Stop containers
+        if: always()
+        run: docker compose down
  
