@@ -42,7 +42,7 @@ MetricFlow is a lightweight dashboard application that:
 | Database   | PostgreSQL 16, Spring Data JPA      |
 | Build      | Maven (Maven Wrapper)               |
 | Container  | Docker, Docker Compose              |
-| CI/CD      | GitHub Actions → GHCR → Railway     |
+| CI/CD      | GitHub Actions → Docker Compose     |
 | Tests      | JUnit 5, Mockito, H2 (in-memory)    |
 
 ---
@@ -74,6 +74,7 @@ metrics-dashboard/
 │       └── ci-cd.yml             # GitHub Actions pipeline
 ├── Dockerfile                    # Multi-stage build
 ├── docker-compose.yml            # Local dev stack
+├── .env.example                  # Environment variable template
 └── pom.xml
 ```
 
@@ -243,100 +244,72 @@ The `Dockerfile` uses a two-stage build — a JDK image compiles the fat JAR, an
 
 ## CI/CD Pipeline
 
-The pipeline is defined at `.github/workflows/ci-cd.yml` and triggers automatically on every push or pull request to `main` / `master`.
+The pipeline is defined at `.github/workflows/ci-cd.yml` and triggers automatically on every push or pull request to `main` / `master`. It can also be triggered manually from the GitHub Actions UI.
 
 ### Pipeline Flow
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Push to main/master                  │
+│         Push to main/master  •  PR  •  Manual trigger   │
 └──────────────────────────┬──────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│               Job 1: build-and-test                     │
+│                    Job 1: build                         │
 │                                                         │
 │  1. Checkout code                                       │
 │  2. Set up JDK 17 (Temurin) with Maven cache            │
-│  3. mvnw clean package -B        ← compile + package    │
-│  4. mvnw test -Dspring.profiles.active=test             │
-│  5. Upload surefire test report as artifact             │
-│  6. Upload metrics-dashboard.jar as artifact            │
+│  3. mvnw clean package -DskipTests   ← compile + JAR   │
+│  4. Upload metrics-dashboard.jar as artifact            │
 └──────────────────────────┬──────────────────────────────┘
-                           │  (only on push, not PR)
+                           │
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│               Job 2: docker                             │
-│               needs: build-and-test                     │
+│                    Job 2: test                          │
+│                    needs: build                         │
 │                                                         │
-│  1. Log in to GitHub Container Registry (GHCR)         │
-│  2. Extract Docker metadata → generate tags:            │
-│       • latest          (default branch only)           │
-│       • <branch-name>                                   │
-│       • sha-<git-sha>                                   │
-│  3. Set up Docker Buildx (multi-platform builder)       │
-│  4. docker build --push  ← multi-stage build            │
-│     Cache layers via GitHub Actions Cache (gha)         │
-│  5. Image published to:                                 │
-│     ghcr.io/<owner>/<repo>/metrics-dashboard            │
+│  1. Checkout code                                       │
+│  2. Set up JDK 17 with Maven cache                      │
+│  3. mvnw test -Dspring.profiles.active=test             │
+│     └─ uses H2 in-memory DB (no PostgreSQL needed)      │
+│  4. Upload surefire test report as artifact             │
 └──────────────────────────┬──────────────────────────────┘
-                           │  (only on push to main/master)
+                           │  (push or manual trigger only)
+                           │  (skipped on PRs)
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│               Job 3: deploy                             │
-│               needs: docker                             │
-│               environment: production                   │
+│                Job 3: docker-run                        │
+│                needs: test                              │
 │                                                         │
-│  1. Install Railway CLI (npm)                           │
-│  2. railway up --detach   ← deploy latest image         │
-│     Uses RAILWAY_TOKEN secret for auth                  │
+│  1. Checkout code                                       │
+│  2. Download JAR artifact from Job 1                    │
+│  3. Create .env from GitHub secrets                     │
+│  4. docker compose --env-file .env up --build           │
+│     └─ builds image from your Dockerfile                │
+│     └─ starts app + PostgreSQL containers               │
+│     └─ streams live logs into Actions console           │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### Triggers
 
-| Event                        | Jobs that run                          |
-|------------------------------|----------------------------------------|
-| Push to `main` / `master`    | build-and-test → docker → deploy       |
-| Pull request to `main`       | build-and-test only (no deploy)        |
+| Event                      | Jobs that run                    |
+|----------------------------|----------------------------------|
+| Push to `main` / `master`  | build → test → docker-run        |
+| Pull request to `main`     | build → test only (no docker)    |
+| Manual (workflow_dispatch) | build → test → docker-run        |
 
 ### Required GitHub Secrets
 
 Go to **Settings → Secrets and variables → Actions** and add:
 
-| Secret            | Where to get it                                                                 |
-|-------------------|---------------------------------------------------------------------------------|
-| `RAILWAY_TOKEN`   | [Railway dashboard](https://railway.app) → Account Settings → Tokens           |
-
-> The `GITHUB_TOKEN` secret for pushing to GHCR is provided automatically by GitHub Actions — no setup needed.
-
-### Switching to Heroku
-
-The workflow includes a commented-out Heroku deploy block. To use it instead of Railway:
-
-1. Comment out the Railway step in `ci-cd.yml`
-2. Uncomment the `akhileshns/heroku-deploy` step
-3. Add these secrets to GitHub:
-
-| Secret             | Description                        |
-|--------------------|------------------------------------|
-| `HEROKU_API_KEY`   | From Heroku → Account Settings     |
-| `HEROKU_APP_NAME`  | Your Heroku app name               |
-| `HEROKU_EMAIL`     | Email associated with your account |
-
-### Pulling the Published Image
-
-Once the pipeline has run, pull the image directly from GHCR:
-
-```bash
-docker pull ghcr.io/<your-github-username>/<repo>/metrics-dashboard:latest
-
-docker run -p 8080:8080 \
-  -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/metricsdb \
-  -e DATABASE_USERNAME=postgres \
-  -e DATABASE_PASSWORD=postgres \
-  ghcr.io/<your-github-username>/<repo>/metrics-dashboard:latest
-```
+| Secret              | Description                        |
+|---------------------|------------------------------------|
+| `POSTGRES_DB`       | Database name                      |
+| `POSTGRES_USER`     | Database username                  |
+| `POSTGRES_PASSWORD` | Database password                  |
+| `DATABASE_PORT`     | PostgreSQL port (e.g. `5432`)      |
+| `APP_PORT`          | App port (e.g. `8080`)             |
 
 ### Viewing Test Reports
 
@@ -345,8 +318,6 @@ After any pipeline run, download the test report artifact from the **Actions** t
 ```
 GitHub → Actions → <workflow run> → Artifacts → test-results
 ```
-
-The surefire XML reports inside can be imported into any CI dashboard or test reporting tool.
 
 ---
 
