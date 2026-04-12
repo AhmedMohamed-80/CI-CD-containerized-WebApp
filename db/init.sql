@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS metrics (
     id        BIGSERIAL PRIMARY KEY,
     name      VARCHAR(100)   NOT NULL,
-    value     DOUBLE PRECISION NOT NULL,
+    metric_value DOUBLE PRECISION NOT NULL,
     status    VARCHAR(50)    NOT NULL,
     timestamp TIMESTAMP      NOT NULL
 );
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS metrics (
 CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON metrics (timestamp DESC);
 
 -- ── Seed sample data ──────────────────────────────────────────
-INSERT INTO metrics (name, value, status, timestamp) VALUES
+INSERT INTO metrics (name, metric_value, status, timestamp) VALUES
     ('cpu_usage',        23.5,  'OK',       NOW() - INTERVAL '1 minute'),
     ('memory_usage',     67.8,  'WARNING',  NOW() - INTERVAL '2 minutes'),
     ('disk_io',          12.1,  'OK',       NOW() - INTERVAL '3 minutes'),
