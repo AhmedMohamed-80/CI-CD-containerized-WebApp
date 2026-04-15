@@ -11,4 +11,4 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 COPY --from=builder /app/target/metrics-dashboard.jar app.jar
 
-ENTRYPOINT ["sh", "-c", "java -jar app.jar --server.port=${APP_PORT}"]
+CMD ["java", "-jar", "app.jar", "--server.port=${APP_PORT}"]
